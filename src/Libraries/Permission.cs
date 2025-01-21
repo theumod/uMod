@@ -689,13 +689,29 @@ namespace Oxide.Core.Libraries
 
             UserData userData = GetUserData(playerId);
 
-            if (!userData.Groups.Add(groupName))
+            if (!groupName.EndsWith("*"))
             {
+                // Add the permission
+                if (userData.Groups.Add(groupName))
+                {
+                    // Call hook for plugins
+                    Interface.Call("OnUserGroupAdded", playerId, groupName);
+                    Interface.Call("OnUserGroupsAdded", playerId, new string[] { groupName });
+                }
                 return;
             }
 
-            // Call hook for plugins
-            Interface.Call("OnUserGroupAdded", playerId, groupName);
+            IEnumerable<string> scopedGroups = groupsData.Keys;
+            if (groupName != "*")
+            {
+                string groupPrefix = groupName.TrimEnd('*');
+                scopedGroups = scopedGroups.Where(g => g.StartsWith(groupPrefix, StringComparison.OrdinalIgnoreCase));
+            }
+            string[] addedGroups = scopedGroups.Where(g => userData.Groups.Add(g)).ToArray();
+            if (addedGroups.Length > 0)
+            {
+                Interface.Call("OnUserGroupsAdded", playerId, addedGroups);
+            }
         }
 
         /// <summary>
@@ -713,25 +729,38 @@ namespace Oxide.Core.Libraries
             }
 
             UserData userData = GetUserData(playerId);
-
-            if (groupName.Equals("*"))
+            if (userData.Groups.Count <= 0)
             {
-                if (userData.Groups.Count <= 0)
+                return;
+            }
+
+            if (!groupName.EndsWith("*"))
+            {
+                if (userData.Groups.Remove(groupName))
                 {
-                    return;
+                    // Call hook for plugins
+                    Interface.Call("OnUserGroupRemoved", playerId, groupName);
+                    Interface.Call("OnUserGroupsRemoved", playerId, new string[] { groupName });
                 }
-
-                userData.Groups.Clear();
                 return;
             }
 
-            if (!userData.Groups.Remove(groupName))
+            if (groupName == "*")
             {
-                return;
+                string[] removedGroups = userData.Groups.ToArray();
+                userData.Groups.Clear();
+                Interface.Call("OnUserGroupsRemoved", playerId, removedGroups);
             }
-
-            // Call hook for plugins
-            Interface.Call("OnUserGroupRemoved", playerId, groupName);
+            else
+            {
+                string groupPrefix = groupName.TrimEnd('*');
+                string[] removedGroups = userData.Groups.Where(g => g.StartsWith(groupPrefix, StringComparison.OrdinalIgnoreCase)).ToArray();
+                foreach (string g in removedGroups)
+                {
+                    userData.Perms.Remove(g);
+                }
+                Interface.Call("OnUserGroupsRemoved", playerId, removedGroups);
+            }
         }
 
         /// <summary>
@@ -759,7 +788,7 @@ namespace Oxide.Core.Libraries
         [LibraryFunction("GroupExists")]
         public bool GroupExists(string groupName)
         {
-            return !string.IsNullOrEmpty(groupName) && (groupName.Equals("*") || groupsData.ContainsKey(groupName));
+            return !string.IsNullOrEmpty(groupName) && (groupName.EndsWith("*") || groupsData.ContainsKey(groupName));
         }
 
         /// <summary>
@@ -799,6 +828,22 @@ namespace Oxide.Core.Libraries
             }
 
             return usersData.Where(u => u.Value.Groups.Contains(groupName, StringComparer.OrdinalIgnoreCase)).Select(u => $"{u.Key} ({u.Value.LastSeenNickname})").ToArray();
+        }
+
+        /// <summary>
+        /// Returns usersIDs in that group
+        /// </summary>
+        /// <param name="groupName"></param>
+        /// <returns></returns>
+        [LibraryFunction("GetUserIDsInGroup")]
+        public string[] GetUserIDsInGroup(string groupName)
+        {
+            if (string.IsNullOrEmpty(groupName) || !groupsData.ContainsKey(groupName))
+            {
+                return new string[0];
+            }
+
+            return usersData.Where(u => u.Value.Groups.Contains(groupName, StringComparer.OrdinalIgnoreCase)).Select(u => u.Key).ToArray();
         }
 
         /// <summary>
@@ -868,44 +913,38 @@ namespace Oxide.Core.Libraries
             // Get the player data
             UserData userData = GetUserData(playerId);
 
-            if (permission.EndsWith("*"))
+            if (!permission.EndsWith("*"))
             {
-                HashSet<string> permissions;
-
-                if (owner == null)
+                // Add the permission
+                if (userData.Perms.Add(permission))
                 {
-                    permissions = new HashSet<string>(registeredPermissions.Values.SelectMany(v => v));
-                }
-                else if (!registeredPermissions.TryGetValue(owner, out permissions))
-                {
-                    return;
-                }
-
-                if (permission.Equals("*"))
-                {
-                    if (!permissions.Aggregate(false, (c, s) => c | userData.Perms.Add(s)))
-                    {
-                        return;
-                    }
-                }
-                else
-                {
-                    if (!permissions.Where(p => p.StartsWith(permission.TrimEnd('*'), StringComparison.OrdinalIgnoreCase)).Aggregate(false, (c, s) => c | userData.Perms.Add(s)))
-                    {
-                        return;
-                    }
+                    // Call hook for plugins
+                    Interface.Call("OnUserPermissionGranted", playerId, permission);
+                    Interface.Call("OnUserPermissionsGranted", playerId, new string[] { permission });
                 }
                 return;
             }
-
-            // Add the permission
-            if (!userData.Perms.Add(permission))
+            HashSet<string> permissions;
+            if (owner == null)
+            {
+                permissions = new HashSet<string>(registeredPermissions.Values.SelectMany(v => v));
+            }
+            else if (!registeredPermissions.TryGetValue(owner, out permissions))
             {
                 return;
             }
 
-            // Call hook for plugins
-            Interface.Call("OnUserPermissionGranted", playerId, permission);
+            IEnumerable<string> scopedPermissions = permissions;
+            if (permission != "*")
+            {
+                string permissionPrefix = permission.TrimEnd('*');
+                scopedPermissions = scopedPermissions.Where(p => p.StartsWith(permissionPrefix, StringComparison.OrdinalIgnoreCase));
+            }
+            string[] grantedPermissions = scopedPermissions.Where(p => userData.Perms.Add(p)).ToArray();
+            if (grantedPermissions.Length > 0)
+            {
+                Interface.Call("OnUserPermissionsGranted", playerId, grantedPermissions);
+            }
         }
 
         /// <summary>
@@ -923,36 +962,39 @@ namespace Oxide.Core.Libraries
 
             // Get the player data
             UserData userData = GetUserData(playerId);
-
-            if (permission.EndsWith("*"))
-            {
-                if (permission.Equals("*"))
-                {
-                    if (userData.Perms.Count <= 0)
-                    {
-                        return;
-                    }
-
-                    userData.Perms.Clear();
-                }
-                else
-                {
-                    if (userData.Perms.RemoveWhere(p => p.StartsWith(permission.TrimEnd('*'), StringComparison.OrdinalIgnoreCase)) <= 0)
-                    {
-                        return;
-                    }
-                }
-                return;
-            }
-
-            // Remove the permission
-            if (!userData.Perms.Remove(permission))
+            if (userData.Perms.Count <= 0)
             {
                 return;
             }
 
-            // Call hook for plugins
-            Interface.Call("OnUserPermissionRevoked", playerId, permission);
+            if (!permission.EndsWith("*"))
+            {
+                // Remove the permission
+                if (userData.Perms.Remove(permission))
+                {
+                    // Call hook for plugins
+                    Interface.Call("OnUserPermissionRevoked", playerId, permission);
+                    Interface.Call("OnUserPermissionsRevoked", playerId, new string[] { permission });
+                }
+                return;
+            }
+
+            if (permission == "*")
+            {
+                string[] revokedPermissions = userData.Perms.ToArray();
+                userData.Perms.Clear();
+                Interface.Call("OnUserPermissionsRevoked", playerId, revokedPermissions);
+            }
+            else
+            {
+                string permissionPrefix = permission.TrimEnd('*');
+                string[] revokedPermissions = userData.Perms.Where(p => p.StartsWith(permissionPrefix, StringComparison.OrdinalIgnoreCase)).ToArray();
+                foreach (string p in revokedPermissions)
+                {
+                    userData.Perms.Remove(p);
+                }
+                Interface.Call("OnUserPermissionsRevoked", playerId, revokedPermissions);
+            }
         }
 
         #endregion User Permission
@@ -969,56 +1011,44 @@ namespace Oxide.Core.Libraries
         public void GrantGroupPermission(string groupName, string permission, Plugin owner)
         {
             // Check it is even a permission
-            if (!PermissionExists(permission, owner) || !GroupExists(groupName))
+            if (!PermissionExists(permission, owner) || string.IsNullOrEmpty(groupName) || !groupsData.TryGetValue(groupName, out GroupData groupData))
             {
                 return;
             }
 
-            // Get the group data
-            if (!groupsData.TryGetValue(groupName, out GroupData groupData))
+            if (!permission.EndsWith("*"))
+            {
+                // Add the permission
+                if (groupData.Perms.Add(permission))
+                {
+                    // Call hook for plugins
+                    Interface.Call("OnGroupPermissionGranted", groupName, permission);
+                    Interface.Call("OnGroupPermissionsGranted", groupName, new string[] { permission });
+                }
+                return;
+            }
+
+            HashSet<string> permissions;
+            if (owner == null)
+            {
+                permissions = new HashSet<string>(registeredPermissions.Values.SelectMany(v => v));
+            }
+            else if (!registeredPermissions.TryGetValue(owner, out permissions))
             {
                 return;
             }
 
-            if (permission.EndsWith("*"))
+            IEnumerable<string> scopedPermissions = permissions;
+            if (permission != "*")
             {
-                HashSet<string> permissions;
-
-                if (owner == null)
-                {
-                    permissions = new HashSet<string>(registeredPermissions.Values.SelectMany(v => v));
-                }
-                else if (!registeredPermissions.TryGetValue(owner, out permissions))
-                {
-                    return;
-                }
-
-                if (permission.Equals("*"))
-                {
-                    if (!permissions.Aggregate(false, (c, s) => c | groupData.Perms.Add(s)))
-                    {
-                        return;
-                    }
-                }
-                else
-                {
-                    if (!permissions.Where(p => p.StartsWith(permission.TrimEnd('*'), StringComparison.OrdinalIgnoreCase)).Aggregate(false, (c, s) => c | groupData.Perms.Add(s)))
-                    {
-                        return;
-                    }
-                }
-
-                return;
+                string permissionPrefix = permission.TrimEnd('*');
+                scopedPermissions = scopedPermissions.Where(p => p.StartsWith(permissionPrefix, StringComparison.OrdinalIgnoreCase));
             }
-
-            // Add the permission
-            if (!groupData.Perms.Add(permission))
+            string[] grantedPermissions = scopedPermissions.Where(p => groupData.Perms.Add(p)).ToArray();
+            if (grantedPermissions.Length > 0)
             {
-                return;
+                Interface.Call("OnGroupPermissionsGranted", groupName, grantedPermissions);
             }
-
-            // Call hook for plugins
-            Interface.Call("OnGroupPermissionGranted", groupName, permission);
         }
 
         /// <summary>
@@ -1029,46 +1059,39 @@ namespace Oxide.Core.Libraries
         [LibraryFunction("RevokeGroupPermission")]
         public void RevokeGroupPermission(string groupName, string permission)
         {
-            if (!GroupExists(groupName) || string.IsNullOrEmpty(permission))
+            if (string.IsNullOrEmpty(permission) || string.IsNullOrEmpty(groupName) || !groupsData.TryGetValue(groupName, out GroupData groupData) || groupData.Perms.Count <= 0)
             {
                 return;
             }
 
-            // Get the group data
-            if (!groupsData.TryGetValue(groupName, out GroupData groupData))
+            if (!permission.EndsWith("*"))
             {
-                return;
-            }
-
-            if (permission.EndsWith("*"))
-            {
-                if (permission.Equals("*"))
+                // Remove the permission
+                if (groupData.Perms.Remove(permission))
                 {
-                    if (groupData.Perms.Count <= 0)
-                    {
-                        return;
-                    }
-
-                    groupData.Perms.Clear();
-                }
-                else
-                {
-                    if (groupData.Perms.RemoveWhere(p => p.StartsWith(permission.TrimEnd('*'), StringComparison.OrdinalIgnoreCase)) <= 0)
-                    {
-                        return;
-                    }
+                    // Call hook for plugins
+                    Interface.Call("OnGroupPermissionRevoked", groupName, permission);
+                    Interface.Call("OnGroupPermissionsRevoked", groupName, new string[] { permission });
                 }
                 return;
             }
 
-            // Remove the permission
-            if (!groupData.Perms.Remove(permission))
+            if (permission == "*")
             {
-                return;
+                string[] revokedPermissions = groupData.Perms.ToArray();
+                groupData.Perms.Clear();
+                Interface.Call("OnGroupPermissionsRevoked", groupName, revokedPermissions);
             }
-
-            // Call hook for plugins
-            Interface.Call("OnGroupPermissionRevoked", groupName, permission);
+            else
+            {
+                string permissionPrefix = permission.TrimEnd('*');
+                string[] revokedPermissions = groupData.Perms.Where(p => p.StartsWith(permissionPrefix, StringComparison.OrdinalIgnoreCase)).ToArray();
+                foreach (string p in revokedPermissions)
+                {
+                    groupData.Perms.Remove(p);
+                }
+                Interface.Call("OnGroupPermissionsRevoked", groupName, revokedPermissions);
+            }
         }
 
         #endregion Group Permission
