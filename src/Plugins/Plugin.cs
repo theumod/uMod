@@ -185,16 +185,28 @@ namespace Oxide.Core.Plugins
         }
 
         /// <summary>
-        /// Subscribes this plugin to the specified hook
+        /// Subscribes this plugin to the specified hook.
+        /// If the plugin is already subscribed to the given hook and the index is >= 0,
+        /// the plugin will be moved to the specified index in the subscription list.
+        /// If the index is -1, the plugin will be appended to the end of the list.
         /// </summary>
-        /// <param name="hook"></param>
-        protected void Subscribe(string hook) => Manager.SubscribeToHook(hook, this);
+        /// <param name="hookName">The hook to subscribe to</param>
+        /// <param name="subIndex">The index in the subscription list where the plugin should be moved to, if >= 0. Default is -1(append to the end)</param>
+        protected void Subscribe(string hookName, int subIndex = -1) => Manager.SubscribeToHook(hookName, this, subIndex);
+
 
         /// <summary>
-        /// Unsubscribes this plugin to the specified hook
+        /// Unsubscribes this plugin from the specified hook
         /// </summary>
-        /// <param name="hook"></param>
-        protected void Unsubscribe(string hook) => Manager.UnsubscribeToHook(hook, this);
+        /// <param name="hookName">The hook to unsubscribe from</param>
+        protected void Unsubscribe(string hookName) => Manager.UnsubscribeFromHook(hookName, this);
+
+        /// <summary>
+        /// Adding the expected type for the hook. Works only for standard hooks(On and Can)
+        /// </summary>
+        /// <param name="hookName">The name of the hook to which it needs to be added</param>
+        /// <param name="type">The type that needs to be added</param>
+        public void AddTypeToHook(string hookName, Type type) => Manager.AddTypeToHook(hookName, type);
 
         /// <summary>
         /// Called when this plugin has been added to the specified manager
